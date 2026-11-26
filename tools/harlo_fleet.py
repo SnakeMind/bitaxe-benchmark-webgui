@@ -140,6 +140,11 @@ def read_state(ip: str) -> Dict[str, Any]:
             "vr_temp_c": tel.get("vr_temp_c"),
             "input_voltage_v": tel.get("input_voltage_v"),
             "device_power_w": tel.get("device_power_w"),
+            "fans": [
+                (int(f.get("channel") or i + 1), f.get("percent"), f.get("rpm"))
+                for i, f in enumerate(tel.get("fans") or [])
+                if isinstance(f, dict)
+            ],
         },
     }
     return st
@@ -311,7 +316,16 @@ def cmd_show(args) -> int:
         print(f"{s['ip']:<15} {s['name'] or '?':<12} {s['model']} fw {s['version']}")
         print(f"   tuning {s['tuning'][0]} MHz / {s['tuning'][1]} mV   live {lv['hashrate_ghs']} GH/s, "
               f"ASIC {lv['asic_temp_c']} C, VR {lv['vr_temp_c']} C, Vin {lv['input_voltage_v']} V, ~{lv['device_power_w']} W")
-        print(f"   fans   {', '.join(f'{ch}: {_fan_txt(b)}' for ch, b in sorted(s['fans'].items())) or '?'}")
+        live_fans = {ch: (pct, rpm) for ch, pct, rpm in lv.get("fans") or []}
+
+        def fan_line(ch, b):
+            pct, rpm = live_fans.get(ch, (None, None))
+            now = f"now {pct}%" if pct is not None else "now ?"
+            if rpm is not None:
+                now += f" / {rpm} rpm"
+            return f"{ch}: {_fan_txt(b)} ({now})"
+
+        print(f"   fans   {', '.join(fan_line(ch, b) for ch, b in sorted(s['fans'].items())) or '?'}")
         print(f"   psu    {s['power']} W   unit {s['unit']}   display {s['display']}")
         print(f"   prot   {s['protections']}   offsets {s['offsets']}")
         print(f"   theme  color {th.get('color') or 'default'}, font {(th.get('name') if th.get('source') == 'custom' else th.get('family')) or 'default'} ({th.get('source')})")
