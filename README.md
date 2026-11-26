@@ -377,6 +377,10 @@ Harlo OS specifics:
   count and frequency, since Harlo OS does not report it.
 - Force a backend with `MINER_FIRMWARE=axeos` or `MINER_FIRMWARE=harlo_os`.
 - `tools/mock_harlo_os.py` is a fake Harlo OS miner for dry runs without hardware.
+- `tools/harlo_fleet.py` shows and syncs non-tuning settings (theme, fans, PSU rating,
+  protections, temperature unit, display) across Harlo OS miners. Dry run by default,
+  `--apply` to write. Easiest to run inside the container, which already has Python and
+  LAN access: `docker exec -it bitaxe-bench-web python tools/harlo_fleet.py show 172.25.36.231-235`.
 
 The Harlo OS API is not officially documented; endpoint shapes come from the
 [HashFleet](https://github.com/SMWARREN/HashFleet) Harlo driver. Verify on one miner first.

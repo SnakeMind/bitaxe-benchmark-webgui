@@ -45,6 +45,15 @@ class State:
         self.rej = 0
         self.lock = threading.Lock()
         self.calls = []
+        # settings used by tools/harlo_fleet.py
+        self.fan = {"channel": 1, "mode": "auto", "manual_percent": 100, "sensor": "asic", "target_c": 60, "percent": 60}
+        self.psu = 50
+        self.unit = "C"
+        self.theme = {"color": "", "palette": [""] * 15, "opacity": [100] * 16, "source": "default", "family": "Chakra Petch"}
+        self.font = b""
+        self.protections = {"asic_fan_c": 70, "asic_shutdown_c": 80, "vr_fan_c": 85, "vr_shutdown_c": 95}
+        self.display = {"mode": "dashboard", "rotation": 0}
+        self.offsets = {"asic_offset_c": 0, "vr_offset_c": 0}
 
     def telemetry(self):
         f, mv = self.freq, self.core
@@ -70,7 +79,9 @@ class State:
             "core_voltage_mv": mv - 4,
             "uptime_seconds": int(time.time() - self.boot),
             "asic_paused": False,
-            "fans": [{"channel": 1, "mode": "auto", "percent": 60, "rpm": 4200, "target_c": 60, "sensor": "asic"}],
+            "fans": [dict(self.fan, rpm=4200)],
+            "power_supply_rating_w": self.psu,
+            "temperature_unit": self.unit,
             "pools": [{"slot": 1, "host": "pool.example", "port": 3333, "user": "x", "connected": True,
                        "active_endpoint": "primary", "accepted_shares": self.acc, "rejected_shares": self.rej}],
         }
@@ -116,6 +127,13 @@ def make_handler(st: State):
                                             "profile": PROFILE})
                 if self.path == "/api/telemetry":
                     return self._send(200, st.telemetry())
+                simple = {"/api/theme": st.theme, "/api/protections": st.protections,
+                          "/api/display": st.display, "/api/temperature-offsets": st.offsets}
+                if self.path in simple:
+                    return self._send(200, simple[self.path])
+                if self.path == "/api/theme/font":
+                    self.send_response(200); self.send_header("Content-Length", str(len(st.font))); self.end_headers()
+                    self.wfile.write(st.font); return
                 return self._unknown()
 
         def _body(self):
@@ -132,6 +150,34 @@ def make_handler(st: State):
             body = self._body()
             with st.lock:
                 st.calls.append(("PUT", self.path, body))
+                ok = {"ok": True}
+                if self.path.startswith("/api/fans/"):
+                    if "mode" in body and body["mode"] == "auto":
+                        st.fan.update(mode="auto", sensor=body["sensor"], target_c=body["target_c"])
+                    elif "percent" in body:
+                        st.fan.update(mode="manual", manual_percent=body["percent"], percent=body["percent"])
+                    else:
+                        return self._send(400, {"ok": False, "output": "bad fan body"})
+                    return self._send(200, ok)
+                if self.path == "/api/power-supply":
+                    st.psu = int(body["rating_w"]); return self._send(200, ok)
+                if self.path == "/api/temperature-unit":
+                    st.unit = body["unit"]; return self._send(200, ok)
+                if self.path == "/api/theme":
+                    for k in ("color", "palette", "opacity"):
+                        if k in body:
+                            st.theme[k] = body[k]
+                    if "family" in body:
+                        st.theme.update(source="google", family=body["family"])
+                    return self._send(200, ok)
+                if self.path == "/api/protections":
+                    if set(body) != set(st.protections):
+                        return self._send(400, {"ok": False, "output": "send all four thresholds"})
+                    st.protections = dict(body); return self._send(200, ok)
+                if self.path == "/api/display":
+                    st.display.update(body); return self._send(200, ok)
+                if self.path == "/api/temperature-offsets":
+                    st.offsets.update(body); return self._send(200, ok)
                 if self.path != "/api/tuning":
                     return self._unknown()
                 if not isinstance(body, dict) or "frequency_mhz" not in body or "core_mv" not in body:
@@ -149,6 +195,12 @@ def make_handler(st: State):
         def do_POST(self):
             if self._down():
                 return
+            if self.path.startswith("/api/theme/font"):
+                n = int(self.headers.get("Content-Length") or 0)
+                st.font = self.rfile.read(n)
+                from urllib.parse import urlparse, parse_qs
+                st.theme.update(source="custom", name=parse_qs(urlparse(self.path).query).get("name", [""])[0])
+                return self._send(200, {"ok": True})
             self._body()
             with st.lock:
                 st.calls.append(("POST", self.path))
